@@ -1,5 +1,4 @@
 from app.db_connection import mongo_client
-from app.db_connection import mongo_client
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 database = mongo_client.process_status_db
