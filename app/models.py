@@ -54,11 +54,11 @@ class InferenceBaseModel(BaseModel):
         examples=["xml", "page"],
     )
     directory: Optional[str] = Field(
-        default="tmp",
+        default="data",
         alias="directory",
         description="Directory to save the files temporarily to.",
         title="Directory",
-        examples=["tmp"],
+        examples=["data"],
     )
     in_path: Optional[str] = Field(
         default="preprocessed",
