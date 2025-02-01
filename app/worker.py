@@ -45,6 +45,7 @@ async def inference_task(
             print(f"Failed to update inference status: {e}")
 
     created_status_dict = created_status.model_dump(by_alias=True, exclude={"password"})
+    print(f"created_status_dict: {created_status_dict}")
     created_status_dict["process_id"] = str(created_status_dict["_id"])
     del created_status_dict["_id"]
 

@@ -2,7 +2,7 @@ from datetime import datetime
 from bson import ObjectId
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic_core import core_schema
-from typing import Optional, Any, Tuple
+from typing import Optional, Any, Tuple, List
 from enum import Enum
 
 
@@ -180,6 +180,48 @@ class InferenceResponseModel(InferenceBaseModel):
         alias="state",
         description="Current state of the inference status.",
         title="State",
+    )
+    files_successful: int = Field(
+        default=0,
+        alias="files_successful",
+        description="Number of files successfully processed.",
+        title="Files-Successful",
+    )
+    files_failed_inference: int = Field(
+        default=0,
+        alias="files_failed_inference",
+        description="Number of files that failed inference.",
+        title="Files-Failed-Inference",
+    )
+    files_failed_download: int = Field(
+        default=0,
+        alias="files_failed_download",
+        description="Number of files that failed downloading.",
+        title="Files-Failed-Download",
+    )
+    files_total: int = Field(
+        default=0,
+        alias="files_total",
+        description="Total number of files to process.",
+        title="Files-Total",
+    )
+    filenames_successful: List[str] = Field(
+        default=[],
+        alias="filenames_successful",
+        description="List of filenames successfully processed.",
+        title="Filenames-Successful",
+    )
+    filenames_failed_process: List[str] = Field(
+        default=[],
+        alias="filenames_failed_process",
+        description="List of filenames that failed processing.",
+        title="Filenames-Failed-Process",
+    )
+    filenames_failed_download: List[str] = Field(
+        default=[],
+        alias="filenames_failed_download",
+        description="List of filenames that failed downloading.",
+        title="Filenames-Failed-Download",
     )
 
 
