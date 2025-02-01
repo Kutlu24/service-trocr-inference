@@ -275,7 +275,7 @@ async def get_inference_files(
         inference_status: InferenceDBModel = Depends(get_inference_status_or_404),
 ) -> StreamingResponse:
     """
-    Retrieve all files of a inference job.
+    Retrieve all files of an inference job.
 
     :param password:
     :param inference_status:
@@ -284,28 +284,23 @@ async def get_inference_files(
     password_val = await check_password(password, inference_status)
 
     if password_val:
-        folder_path_out = os.path.join(inference_status.directory,
-                                       inference_status.out_path,
-                                       str(inference_status.id)
-                                       )
-
-        if not os.path.exists(folder_path_out):
+        if not os.path.exists(inference_status.out_path):
             raise HTTPException(status_code=404, detail="Files not found")
 
         zip_bytes_io = io.BytesIO()
         with zipfile.ZipFile(zip_bytes_io, 'w', zipfile.ZIP_DEFLATED) as zipped:
-            for root, _, files in os.walk(folder_path_out):
+            for root, _, files in os.walk(inference_status.out_path):
                 for filename in files:
                     full_file_path = os.path.join(root, filename)
                     zipped.write(full_file_path, filename)
 
+        zip_bytes_io.seek(0)
+
         response = StreamingResponse(
-            iter([zip_bytes_io.getvalue()]),
-            media_type="application/x-zip-compressed",
-            headers={"Content-Disposition": f"inline;filename=inference_{str(inference_status.id)}.zip",
-                     "Content-Length": str(zip_bytes_io.getbuffer().nbytes)}
+            zip_bytes_io,
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename=inference_{str(inference_status.id)}.zip"}
         )
-        zip_bytes_io.close()
         return response
     else:
         raise HTTPException(status_code=401, detail="Invalid password")
