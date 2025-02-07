@@ -122,12 +122,6 @@ class InferenceBaseModel(BaseModel):
         description="size of image to be processed.",
         title="Image-Size",
     )
-    preprocesing_uri: Optional[str] = Field(
-        default="",
-        alias="preprocesing_uri",
-        description="URI to download preprocessing files from.",
-        title="Preprocessing-URI",
-    )
 
     model_config = ConfigDict(
         populate_by_name=True,

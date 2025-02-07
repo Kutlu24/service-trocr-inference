@@ -181,8 +181,7 @@ async def create_inference_status(
             "aspect_ratio_resize": created_inference_status.aspect_ratio_resize,
             "output_txt": created_inference_status.output_txt,
             "output_xml": created_inference_status.output_xml,
-            "image_size": created_inference_status.image_size,
-            "preprocessing_uri": created_inference_status.preprocesing_uri,
+            "image_size": created_inference_status.image_size
         }
     else:
         raise HTTPException(status_code=500, detail="Internal server error")
