@@ -176,7 +176,6 @@ async def create_inference_status(
             "created_at": created_inference_status.created_at,
             "trocr_model": created_inference_status.trocr_model,
             "trocr_processor": created_inference_status.trocr_processor,
-            "use_cuda": created_inference_status.use_cuda,
             "do_resize": created_inference_status.do_resize,
             "aspect_ratio_resize": created_inference_status.aspect_ratio_resize,
             "output_txt": created_inference_status.output_txt,

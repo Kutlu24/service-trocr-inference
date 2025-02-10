@@ -86,12 +86,6 @@ class InferenceBaseModel(BaseModel):
         description="TrOCR processor used in inference process.",
         title="TrOCR_Processor",
     )
-    use_cuda: Optional[bool] = Field(
-        default=True,
-        alias="use_cuda",
-        description="Whether to use cuda.",
-        title="Use-Cuda",
-    )
     do_resize: Optional[bool] = Field(
         default=True,
         alias="do_resize",
