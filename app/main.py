@@ -176,8 +176,6 @@ async def create_inference_status(
             "created_at": created_inference_status.created_at,
             "trocr_model": created_inference_status.trocr_model,
             "trocr_processor": created_inference_status.trocr_processor,
-            "output_txt": created_inference_status.output_txt,
-            "output_xml": created_inference_status.output_xml,
             "target_image_size": created_inference_status.target_image_size
         }
     else:
