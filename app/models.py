@@ -86,18 +86,6 @@ class InferenceBaseModel(BaseModel):
         description="TrOCR processor used in inference process.",
         title="TrOCR_Processor",
     )
-    do_resize: Optional[bool] = Field(
-        default=True,
-        alias="do_resize",
-        description="Whether to resize image.",
-        title="Do-Resize",
-    )
-    aspect_ratio_resize: Optional[bool] = Field(
-        default=True,
-        alias="aspect_ratio_resize",
-        description="Whether to use aspect ratio to resize image.",
-        title="Aspect-Ratio-Resize",
-    )
     output_txt: Optional[bool] = Field(
         default=True,
         alias="output_txt",
@@ -110,11 +98,11 @@ class InferenceBaseModel(BaseModel):
         description="Whether to save inference results in XML file.",
         title="Output-XML",
     )
-    image_size: Optional[Tuple[int, int]] = Field(
+    target_image_size: Optional[Tuple[int, int]] = Field(
         default=(384, 384),
-        alias="image_size",
+        alias="target_image_size",
         description="size of image to be processed.",
-        title="Image-Size",
+        title="Target-Image-Size",
     )
 
     model_config = ConfigDict(

@@ -176,11 +176,9 @@ async def create_inference_status(
             "created_at": created_inference_status.created_at,
             "trocr_model": created_inference_status.trocr_model,
             "trocr_processor": created_inference_status.trocr_processor,
-            "do_resize": created_inference_status.do_resize,
-            "aspect_ratio_resize": created_inference_status.aspect_ratio_resize,
             "output_txt": created_inference_status.output_txt,
             "output_xml": created_inference_status.output_xml,
-            "image_size": created_inference_status.image_size
+            "target_image_size": created_inference_status.target_image_size
         }
     else:
         raise HTTPException(status_code=500, detail="Internal server error")
