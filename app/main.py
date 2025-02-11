@@ -178,7 +178,10 @@ async def create_inference_status(
             "password": created_inference_status.password,
             "created_at": created_inference_status.created_at,
             "trocr_model": created_inference_status.trocr_model,
-            "target_image_size": created_inference_status.target_image_size
+            "target_image_size": created_inference_status.target_image_size,
+            "abbrev": created_inference_status.abbrev,
+            "crop": created_inference_status.crop,
+            "stop_on_fail": created_inference_status.stop_on_fail
         }
     else:
         raise HTTPException(status_code=500, detail="Internal server error")

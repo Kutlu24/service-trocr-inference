@@ -66,6 +66,24 @@ class InferenceBaseModel(BaseModel):
         description="size of image to be processed.",
         title="Target-Image-Size",
     )
+    abbrev: Optional[bool] = Field(
+        default=False,
+        alias="abbrev",
+        description="Whether to expand abbreviations in text.",
+        title="Abbreviation",
+    )
+    crop: Optional[bool] = Field(
+        default=False,
+        alias="crop",
+        description="Whether to crop images to their line mask.",
+        title="Crop",
+    )
+    stop_on_fail: Optional[bool] = Field(
+        default=False,
+        alias="stop_on_fail",
+        description="Whether to stop processing on failure.",
+        title="Stop-On-Fail",
+    )
 
     model_config = ConfigDict(
         populate_by_name=True,
