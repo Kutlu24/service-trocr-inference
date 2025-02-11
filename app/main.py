@@ -5,6 +5,7 @@ import shutil
 import zipfile
 from asyncio import gather
 from contextlib import asynccontextmanager
+from fastapi.responses import RedirectResponse
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -56,6 +57,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    return RedirectResponse(url="/docs")
 
 
 async def get_inference_status_or_404(
