@@ -80,12 +80,6 @@ class InferenceBaseModel(BaseModel):
         description="TrOCR model used in inference process.",
         title="TrOCR_Model",
     )
-    trocr_processor: Optional[str] = Field(
-        default="microsoft/trocr-large-handwritten",
-        alias="trocr_processor",
-        description="TrOCR processor used in inference process.",
-        title="TrOCR_Processor",
-    )
     target_image_size: Optional[Tuple[int, int]] = Field(
         default=(384, 384),
         alias="target_image_size",
