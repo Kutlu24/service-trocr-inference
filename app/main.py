@@ -1,305 +1,236 @@
-import io
+"""
+Main script FLOW Inference Service
+"""
+import json
 import logging
-import os.path
-import shutil
-import zipfile
-from asyncio import gather
+import os
+from typing import Any, List
 from contextlib import asynccontextmanager
-from fastapi.responses import RedirectResponse
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
-
-from bson import ObjectId
+import aiofiles
 from fastapi import (
     FastAPI,
     Body,
     Depends,
     HTTPException,
     status,
+    Security,
     BackgroundTasks
 )
-from fastapi.encoders import ENCODERS_BY_TYPE
-from fastapi.responses import StreamingResponse
+from fastapi.security import APIKeyHeader
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 
-from app.database import mongo_database
-from app.db_connection import (
-    ping_mongo_db_server,
+from app.models.evaluation_models import (
+    HFEvaluationRequestModel,
+    EvaluationResponseModel
 )
 
-from app.models import InferenceRequestModel, InferenceResponseModel, InferenceDBModel, PyObjectId
-from app.worker import inference_task
+from app.models.inference_models import (
+    InferenceRequestModel,
+    InferenceResponseModel
+)
 
-logger = logging.getLogger('uvicorn')
+from app.models.raw_xml_upload_models import (
+    RawXMLMergeRequestModel,
+    RawXMLMergeResponseModel
+)
 
-ENCODERS_BY_TYPE[ObjectId] = str
-logging.basicConfig(level=logging.INFO)
+from app.tasks import inference_task
+from app.tasks import evaluation_task
+from app.tasks import xml_merge_task
 
+logging.getLogger("fastapi").setLevel(logging.DEBUG)
+logging.getLogger("uvicorn").setLevel(logging.WARNING)
+logging.basicConfig(level=logging.DEBUG)
+
+api_key_header = APIKeyHeader(name="X-API-KEY", auto_error=False)
+
+async def check_api_key(api_key: str | None = Security(api_key_header)) -> None:
+    env_api_key = os.getenv("API_KEY")
+    if env_api_key and api_key != env_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API Key",
+        )
+
+INFERENCE_STATUS_FILE = os.getenv("INFERENCE_STATUS_FILE", "inference-status.json")
+EVALUATION_STATUS_FILE = os.getenv("EVALUATION_STATUS_FILE", "evaluation-status.json")
+XML_MERGE_STATUS_FILE = os.getenv("XML_MERGE_STATUS_FILE", "xml-merge-status.json")
+
+async def load_json(file_path: str, model_cls):
+    if os.path.exists(file_path):
+        async with aiofiles.open(file_path, encoding="utf-8") as file:
+            try:
+                data = json.loads(await file.read())
+                return [model_cls(**item) for item in data]
+            except json.JSONDecodeError:
+                return []
+    return []
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    Asynchronous context manager for FastAPI application lifespan events.
-
-    :param: app: The FastAPI application instance.
-
-    :return: None: This function does not yield any value but ensures database tables are created on startup.
-    """
-    await gather(
-        ping_mongo_db_server(),
-    )
-
-    db = mongo_database()
-    collection_list = await db.list_collection_names()
-    if "inference_status" not in collection_list:
-        await db.create_collection("inference_status")
-
+async def lifespan(_: FastAPI):
     yield
 
+app = FastAPI(title="FLOW-Inference-Microservice", lifespan=lifespan)
 
-app = FastAPI(lifespan=lifespan)
-
-
-@app.get("/", include_in_schema=False)
-async def root():
-    return RedirectResponse(url="/docs")
-
-
-async def get_inference_status_or_404(
-        inference_id: str,
-        db: AsyncIOMotorDatabase = Depends(mongo_database),
-) -> InferenceDBModel:
-    """
-    Retrieve an inference status by ObjectID or raise HTTP 404 if not found.
-
-    :param: inference_id: The ObjectID of the inference status to retrieve.
-    :param: db: The MongoDB database connection object, injected by FastAPI.
-
-    :Return: The found InferenceStatus object.
-    """
-    if not ObjectId.is_valid(inference_id):
-        raise HTTPException(status_code=400, detail="Invalid ObjectID format")
-    inference_status = await db.inference_status.find_one(
-        {"_id": ObjectId(inference_id)}
-    )
-
-    if inference_status is None:
-        raise HTTPException(status_code=404, detail="Inference status not found")
-
-    return InferenceDBModel(**inference_status)
-
-
-async def check_password(
-        password: str,
-        inference_status: InferenceDBModel,
-) -> bool:
-    """
-
-    :param password:
-    :param inference_status:
-    :return:
-    """
-    if password is None and inference_status.password == '':
-        return True
-    if password is None and inference_status.password is not None:
-        raise HTTPException(status_code=401, detail="Password required")
-    if inference_status.password != password:
-        raise HTTPException(status_code=401, detail="Invalid password")
-    return True
-
-
-@app.get(
-    "/status/{inference_id}",
-    response_description="Retrieve an inference status by ObjectID.",
-    response_model=InferenceResponseModel,
-    response_model_by_alias=False,
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["100 per day", "4/minute"],
 )
-async def get_inference_status(
-        password: str = None,
-        inference_status: InferenceDBModel = Depends(get_inference_status_or_404)
-) -> InferenceResponseModel:
-    """
-    Retrieve an inference status by ObjectID.
 
-    :param password:
-    :param inference_status:
-    """
-    new_status = inference_status
-    password_val = await check_password(password, new_status)
-    if password_val:
-        return InferenceResponseModel(**new_status.model_dump(by_alias=True, exclude={"password"}))
-    else:
-        raise HTTPException(status_code=401, detail="Invalid password")
-
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 @app.post(
-    "/run_inference",
-    response_description="Start a new inference job.",
+    "/inference/start",
     response_model=InferenceResponseModel,
-    response_model_by_alias=False,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(check_api_key)],
 )
-async def create_inference_status(
-        background_tasks: BackgroundTasks,
-        inference_parameters: InferenceRequestModel = Body(...),
-        db: AsyncIOMotorDatabase = Depends(mongo_database),
-) -> dict[str, str]:
-    """
-    Create a new inference status.
+def start_inference(
+    background_tasks: BackgroundTasks,
+    params: InferenceRequestModel = Body(...)
+) -> Any:
 
-    :param: inference_parameters: The inference status to create.
-    :param: db: The MongoDB database connection object, injected by FastAPI.
-    :param: background_tasks: The background tasks object, injected by FastAPI.
-
-    :return: The created InferenceStatus object.
-    """
-    result = await db.inference_status.insert_one(
-        inference_parameters.model_dump(exclude={"github_access_token"})
+    status_obj = InferenceResponseModel(
+        **params.model_dump(by_alias=True, exclude={"huggingface_token"})
     )
-    created_inference_status = await db.inference_status.find_one({"_id": result.inserted_id})
 
-    if created_inference_status:
-        created_inference_status = InferenceDBModel(
-            id=PyObjectId(str(created_inference_status["_id"])),
-            **created_inference_status
-        )
+    background_tasks.add_task(
+        inference_task,
+        huggingface_token=params.huggingface_token,
+        created_status=status_obj,
+    )
 
-        # Start the inference job
-        background_tasks.add_task(
-            inference_task,
-            github_access_token=inference_parameters.github_access_token,
-            created_status=created_inference_status,
-            db=db,
-        )
-        return {
-            "id": str(created_inference_status.id),
-            "state": created_inference_status.state,
-            "repo_name": created_inference_status.repo_name,
-            "directory": created_inference_status.directory,
-            "password": created_inference_status.password,
-            "created_at": created_inference_status.created_at,
-            "trocr_model": created_inference_status.trocr_model,
-            "target_image_size": created_inference_status.target_image_size,
-            "abbrev": created_inference_status.abbrev,
-            "crop": created_inference_status.crop,
-            "stop_on_fail": created_inference_status.stop_on_fail
-        }
-    else:
-        raise HTTPException(status_code=500, detail="Internal server error")
+    return {"message": "Inference job started", **status_obj.dict()}
 
+@app.get("/inference/status", response_model=List[InferenceResponseModel])
+async def get_inference_status():
+    data = await load_json(INFERENCE_STATUS_FILE, InferenceResponseModel)
+    if not data:
+        raise HTTPException(404, "No inference jobs found")
+    return data
+
+@app.get("/inference/status/{uuid}", response_model=InferenceResponseModel)
+async def get_inference_status_by_id(uuid: str):
+    data = await load_json(INFERENCE_STATUS_FILE, InferenceResponseModel)
+    for item in data:
+        if item.request_id == uuid:
+            return item
+    raise HTTPException(404, "Inference job not found")
+
+@app.post(
+    "/evaluation/hf/start",
+    response_model=EvaluationResponseModel,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(check_api_key)],
+)
+def start_hf_evaluation(
+    background_tasks: BackgroundTasks,
+    params: HFEvaluationRequestModel = Body(...)
+):
+    status_obj = EvaluationResponseModel(
+        **params.model_dump(by_alias=True, exclude={"huggingface_token"})
+    )
+
+    background_tasks.add_task(
+        evaluation_task,
+        huggingface_token=params.huggingface_token,
+        created_status=status_obj,
+        mode="hf",  # 👈 explicit
+    )
+
+    return {"message": "HF evaluation job started", **status_obj.dict()}
 
 @app.get(
-    "/status",
-    response_description="Retrieve all inference statuses.",
-    response_model=list[InferenceResponseModel],
-    response_model_by_alias=False,
+    "/evaluation/status",
+    response_description="Retrieve all evaluation statuses.",
+    response_model=List[EvaluationResponseModel],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_api_key)],
 )
-async def get_all_inference_statuses(
-        db: AsyncIOMotorDatabase = Depends(mongo_database),
-) -> list:
+async def get_all_evaluation_statuses_or_404() -> List[EvaluationResponseModel]:
     """
-    Retrieve all inference statuses.
-
-    :param: db: The MongoDB database connection object, injected by FastAPI.
-
-    :return: A list of all found InferenceStatus objects without password.
+    Retrieve all evaluation job statuses.
     """
-    query = {"password": {"$eq": None, "$exists": True}}
-    inference_statuses = await db.inference_status.find(query).to_list(length=None)
-    query2 = {"password": {"$eq": "", "$exists": True}}
-    inference_statuses2 = await db.inference_status.find(query2).to_list(length=None)
-
-    inference_statuses.extend(inference_statuses2)
-
-    responses = [
-        InferenceResponseModel(
-            id=PyObjectId(inference_status["_id"]),
-            **inference_status
-        ).model_dump(by_alias=True)
-        for inference_status in inference_statuses
-    ]
-    return responses
-
-
-@app.delete(
-    "/status/{inference_id}",
-    response_description="Delete an inference status by ObjectID.",
-    status_code=status.HTTP_204_NO_CONTENT
-)
-async def delete_inference_status(
-        password: str = None,
-        inference_status: InferenceDBModel = Depends(get_inference_status_or_404),
-        db: AsyncIOMotorDatabase = Depends(mongo_database),
-) -> None:
-    """
-    Delete a inference status by ObjectID.
-
-    Args:
-        db (AsyncIOMotorDatabase): The MongoDB database connection object, injected by FastAPI.
-        :param password:
-        :param db:
-        :param inference_status:
-    """
-    password_val = await check_password(password, inference_status)
-
-    if password_val:
-        folder_path_out = os.path.join(inference_status.directory,
-                                       inference_status.out_path,
-                                       str(inference_status.id)
-                                       )
-        folder_path_in = os.path.join(inference_status.directory,
-                                      inference_status.in_path,
-                                      str(inference_status.id)
-                                      )
-        if os.path.exists(folder_path_out):
-            shutil.rmtree(folder_path_out)
-        if os.path.exists(folder_path_in):
-            shutil.rmtree(folder_path_in)
-
-        if os.path.exists('logs'):
-            for file in os.listdir('logs'):
-                if file.startswith(str(inference_status.id)):
-                    os.remove(os.path.join('logs', file))
-
-        await db.inference_status.delete_one({"_id": inference_status.id})
-    else:
-        raise HTTPException(status_code=401, detail="Invalid password")
-
+    data = await load_json(EVALUATION_STATUS_FILE, EvaluationResponseModel)
+    if len(data) == 0:
+        raise HTTPException(status_code=404, detail="No evaluation jobs found")
+    return data
 
 @app.get(
-    "/files/{inference_id}",
-    response_description="Retrieve all files of a inference job.",
+    "/evaluation/status/{uuid}",
+    response_description="Retrieve an evaluation status by UUID.",
+    response_model=EvaluationResponseModel,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_api_key)],
 )
-async def get_inference_files(
-        password: str = None,
-        inference_status: InferenceDBModel = Depends(get_inference_status_or_404),
-) -> StreamingResponse:
+async def get_evaluation_status_or_404(uuid: str) -> EvaluationResponseModel:
     """
-    Retrieve all files of an inference job.
-
-    :param password:
-    :param inference_status:
-    :return: A dictionary containing the file names and their content.
+    Retrieve a single evaluation job status by its UUID.
     """
-    password_val = await check_password(password, inference_status)
+    data = await load_json(EVALUATION_STATUS_FILE, EvaluationResponseModel)
+    for item in data:
+        if item.request_id == uuid:
+            return item
+    raise HTTPException(status_code=404, detail="Evaluation job not found")
 
-    if password_val:
-        if not os.path.exists(inference_status.out_path):
-            raise HTTPException(status_code=404, detail="Files not found")
+@app.post(
+    "/xml-merge/start",
+    response_model=RawXMLMergeResponseModel,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(check_api_key)],
+)
+def start_xml_merge(
+    background_tasks: BackgroundTasks,
+    params: RawXMLMergeRequestModel = Body(...)
+) -> Any:
 
-        zip_bytes_io = io.BytesIO()
-        with zipfile.ZipFile(zip_bytes_io, 'w', zipfile.ZIP_DEFLATED) as zipped:
-            for root, _, files in os.walk(inference_status.out_path):
-                for filename in files:
-                    full_file_path = os.path.join(root, filename)
-                    zipped.write(full_file_path, filename)
+    status_obj = RawXMLMergeResponseModel(
+        **params.model_dump(by_alias=True, exclude={"huggingface_token"})
+    )
 
-        zip_bytes_io.seek(0)
+    background_tasks.add_task(
+        xml_merge_task,
+        huggingface_token=params.huggingface_token,
+        created_status=status_obj,
+    )
 
-        response = StreamingResponse(
-            zip_bytes_io,
-            media_type="application/zip",
-            headers={"Content-Disposition": f"attachment; filename=inference_{str(inference_status.id)}.zip"}
-        )
-        return response
-    else:
-        raise HTTPException(status_code=401, detail="Invalid password")
+    return {"message": "XML merge job started", **status_obj.dict()}
+
+@app.get(
+    "/xml-merge/status",
+    response_description="Retrieve all XML merge statuses.",
+    response_model=List[RawXMLMergeResponseModel],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_api_key)],
+)
+async def get_all_xml_merge_statuses_or_404() -> List[RawXMLMergeResponseModel]:
+    """
+    Retrieve all XML merge job statuses.
+    """
+    data = await load_json(XML_MERGE_STATUS_FILE, RawXMLMergeResponseModel)
+    if len(data) == 0:
+        raise HTTPException(status_code=404, detail="No XML merge jobs found")
+    return data
+
+@app.get(
+    "/xml-merge/status/{uuid}",
+    response_description="Retrieve an XML merge status by UUID.",
+    response_model=RawXMLMergeResponseModel,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(check_api_key)],
+)
+async def get_xml_merge_status_or_404(uuid: str) -> RawXMLMergeResponseModel:
+    """
+    Retrieve a single XML merge job status by its UUID.
+    """
+    data = await load_json(XML_MERGE_STATUS_FILE, RawXMLMergeResponseModel)
+    for item in data:
+        if item.request_id == uuid:
+            return item
+    raise HTTPException(status_code=404, detail="XML merge job not found")
