@@ -1,6 +1,7 @@
 """
 Main script FLOW Inference Service
 """
+import inspect
 import json
 import logging
 import os
@@ -38,13 +39,16 @@ from app.models.raw_xml_upload_models import (
     RawXMLMergeResponseModel
 )
 
-from app.tasks import inference_task
-from app.tasks import evaluation_task
-from app.tasks import xml_merge_task
+from app.tasks.inference_task import inference_task
+from app.tasks.evaluation_task import evaluation_task
+from app.tasks.xml_merge_task import xml_merge_task
 
 logging.getLogger("fastapi").setLevel(logging.DEBUG)
 logging.getLogger("uvicorn").setLevel(logging.WARNING)
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
 
 api_key_header = APIKeyHeader(name="X-API-KEY", auto_error=False)
 
@@ -95,11 +99,18 @@ def start_inference(
     background_tasks: BackgroundTasks,
     params: InferenceRequestModel = Body(...)
 ) -> Any:
-
+    print("TASK OBJECT:", inference_task, "IS ASYNC:", hasattr(inference_task, "__await__"))
     status_obj = InferenceResponseModel(
         **params.model_dump(by_alias=True, exclude={"huggingface_token"})
     )
 
+    logger = logging.getLogger("app.inference")
+
+    logger.info("Scheduling inference_task: obj=%r type=%s iscallable=%s iscoroutinefunction=%s",
+                inference_task,
+                type(inference_task),
+                callable(inference_task),
+                inspect.iscoroutinefunction(inference_task))
     background_tasks.add_task(
         inference_task,
         huggingface_token=params.huggingface_token,
@@ -129,19 +140,15 @@ async def get_inference_status_by_id(uuid: str):
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(check_api_key)],
 )
-def start_hf_evaluation(
-    background_tasks: BackgroundTasks,
-    params: HFEvaluationRequestModel = Body(...)
-):
-    status_obj = EvaluationResponseModel(
-        **params.model_dump(by_alias=True, exclude={"huggingface_token"})
-    )
+@app.post("/evaluation/hf/start", response_model=EvaluationResponseModel, status_code=201)
+def start_hf_evaluation(background_tasks: BackgroundTasks, params: HFEvaluationRequestModel = Body(...)):
+    status_obj = EvaluationResponseModel(source=params.huggingface_repo_name)
 
     background_tasks.add_task(
         evaluation_task,
         huggingface_token=params.huggingface_token,
         created_status=status_obj,
-        mode="hf",  # 👈 explicit
+        splits=params.splits,
     )
 
     return {"message": "HF evaluation job started", **status_obj.dict()}
