@@ -3,20 +3,16 @@ from app.models.evaluation_models import EvaluationResponseModel
 
 
 async def evaluation_task(
-        huggingface_token: str,
-        created_status: EvaluationResponseModel
+    huggingface_token: str,
+    created_status: EvaluationResponseModel,
+    splits: list[str] | None = None,
 ):
     print("Evaluation started")
-
-    params = created_status.model_dump(
-        by_alias=True,
-        include={"splits"}
-    )
 
     worker = Evaluation(
         download_repo_name=created_status.source,
         hf_token=huggingface_token,
-        **params
+        splits=splits,
     )
 
     try:

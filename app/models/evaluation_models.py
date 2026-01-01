@@ -24,15 +24,15 @@ class EvaluationRequestBase(BaseModel):
     Controls which dataset to evaluate and which splits to use.
     """
 
+    huggingface_repo_name: Annotated[str, Field(
+        alias="huggingface_repo_name",
+        description="Dataset to evaluate. Must contain inference_* column."
+    )]
+
     huggingface_token: Annotated[str | None, Field(
         default=None,
         alias="huggingface_token",
         description="Required if dataset is private or HF upload is requested."
-    )]
-
-    huggingface_repo_name: Annotated[str, Field(
-        alias="huggingface_repo_name",
-        description="Dataset to evaluate. Must contain inference_* column."
     )]
 
     splits: Annotated[List[str] | None, Field(
