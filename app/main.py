@@ -140,7 +140,6 @@ async def get_inference_status_by_id(uuid: str):
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(check_api_key)],
 )
-@app.post("/evaluation/hf/start", response_model=EvaluationResponseModel, status_code=201)
 def start_hf_evaluation(background_tasks: BackgroundTasks, params: HFEvaluationRequestModel = Body(...)):
     status_obj = EvaluationResponseModel(source=params.huggingface_repo_name)
 
