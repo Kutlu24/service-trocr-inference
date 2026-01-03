@@ -57,7 +57,7 @@ filelock==3.20.0
     #   huggingface-hub
     #   torch
     #   transformers
-../package-trocr-inference
+flow-inference @ git+https://github.com/The-Flow-Project/package-trocr-inference.git@90ff332c4ba4dd1e21d2af91ec4151dd3db4faca
     # via service-trocr-inference (pyproject.toml)
 frozenlist==1.8.0
     # via

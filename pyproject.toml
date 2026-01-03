@@ -53,6 +53,9 @@ keywords = [
     "fastapi"
 ]
 
+[tool.setuptools.packages]
+find = { where = ["src"] }
+
 [project.urls]
 Homepage = "https://flow-project.net"
 Repository = "https://github.com/The-Flow-Project/service-trocr-inference"
@@ -61,5 +64,4 @@ Repository = "https://github.com/The-Flow-Project/service-trocr-inference"
 # uv: external Flow packages
 # ------------------------------------------------------------------
 [tool.uv.sources]
-# TODO: change once repo is made public
-flow-inference = { path = "../package-trocr-inference" }
+flow-inference = { git = "https://github.com/The-Flow-Project/package-trocr-inference.git" }
