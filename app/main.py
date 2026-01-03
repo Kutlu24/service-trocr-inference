@@ -194,10 +194,12 @@ async def get_evaluation_status_or_404(uuid: str) -> EvaluationResponseModel:
 def start_xml_merge(
     background_tasks: BackgroundTasks,
     params: RawXMLMergeRequestModel = Body(...)
-) -> Any:
+):
 
     status_obj = RawXMLMergeResponseModel(
-        **params.model_dump(by_alias=True, exclude={"huggingface_token"})
+        source_raw_repo=params.raw_xml_repo,
+        source_inference_repo=params.inference_repo,
+        output_repo_name=params.output_repo_name or params.raw_xml_repo,
     )
 
     background_tasks.add_task(
@@ -206,7 +208,7 @@ def start_xml_merge(
         created_status=status_obj,
     )
 
-    return {"message": "XML merge job started", **status_obj.dict()}
+    return {"message": "XML merge job started", **status_obj.model_dump()}
 
 @app.get(
     "/xml-merge/status",
