@@ -1,21 +1,21 @@
-import logging
 import os
 import threading
 import time
-
 from flow_inference.inference import Inference
-from app.models.inference_models import InferenceResponseModel
+from app.models.inference_models import InferenceResponseModel, StateEnum
+from app.storage import StatusRepository
+from loguru import logger
 
 
 async def inference_task(
-        huggingface_token: str,
-        created_status: InferenceResponseModel
+    repository: StatusRepository,
+    huggingface_token: str | None,
+    created_status: InferenceResponseModel,
 ):
-    print("Inference started")
-    logger = logging.getLogger("inference.task")
 
     logger.info(
-        "Inference task started | pid=%s | thread=%s",
+        "Inference task started | request_id=%s | pid=%s | thread=%s",
+        created_status.request_id,
         os.getpid(),
         threading.current_thread().name,
     )
@@ -29,13 +29,13 @@ async def inference_task(
             "target_image_size",
             "stop_on_fail",
             "splits",
-            "push_to_hub"
+            "push_to_hub",
         }
     )
 
     logger.info("Inference params: %s", params)
     logger.info(
-        "HF source repo=%s | upload repo=%s | push_to_hub=%s | token_present=%s",
+        "HF source=%s | upload repo=%s | push_to_hub=%s | token_present=%s",
         created_status.source,
         params.get("upload_repo_name"),
         params.get("push_to_hub"),
@@ -43,45 +43,59 @@ async def inference_task(
     )
 
     try:
-        logger.info("Constructing Inference object...")
         worker = Inference(
             download_repo_name=created_status.source,
             hf_token=huggingface_token,
-            **params
+            **params,
         )
-        logger.info("Inference object constructed successfully")
+        logger.info("Inference object created")
     except Exception:
-        logger.exception("Failed during Inference() construction")
+        logger.exception("Failed to construct Inference object")
+        created_status.state = StateEnum.FAILED
+        await repository.save(created_status)
         raise
 
     start = time.time()
-    logger.info("Starting perform_inference()")
 
     try:
+        logger.info("Starting inference")
         result = worker.perform_inference()
         elapsed = time.time() - start
+
+        # If your worker returns statistics, attach them here
+        if hasattr(result, "total_records"):
+            created_status.total_records = result.total_records
+
+        created_status.state = StateEnum.DONE
+        created_status.runtime_seconds = elapsed
+
         logger.info(
-            "perform_inference() completed in %.2fs | result=%s",
+            "Inference finished successfully in %.2fs | records=%s",
             elapsed,
-            type(result).__name__,
-        )
-        state = "completed"
-        logger.info(
-            "Inference task finished | state=%s | pid=%s",
-            state,
-            os.getpid(),
-        )
-    except Exception:
-        elapsed = time.time() - start
-        logger.exception(
-            "perform_inference() failed after %.2fs",
-            elapsed,
-        )
-        state = "failed"
-        logger.info(
-            "Inference task finished with error | state=%s | pid=%s",
-            state,
-            os.getpid(),
+            created_status.total_records,
         )
 
-    # write to status file...
+    except Exception as e:
+        elapsed = time.time() - start
+        created_status.state = StateEnum.FAILED
+        created_status.runtime_seconds = elapsed
+
+        logger.exception(
+            "Inference failed after %.2fs | error=%s",
+            elapsed,
+            str(e),
+        )
+
+        await repository.save(created_status)
+
+        if created_status.stop_on_fail:
+            raise
+        return
+
+    await repository.save(created_status)
+
+    logger.info(
+        "Final inference status saved | request_id=%s | state=%s",
+        created_status.request_id,
+        created_status.state,
+    )
