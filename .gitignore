@@ -166,3 +166,7 @@ cython_debug/
 
 # logs folder
 /logs/
+
+# database files
+*.db
+*.sqlite
