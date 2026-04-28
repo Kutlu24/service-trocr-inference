@@ -1,43 +1,27 @@
 """
-Storage layer for all job statuses.
+Redis storage layer for all inference-service job statuses.
 
 Supports:
 - inference
 - xml_merge
 - evaluation
-
-Backends:
-1. SQLModel (SQLite / Postgres)
-2. JSON file
-
-Exports:
-- inference-status.json
-- xml-merge-status.json
-- evaluation-status.json
 """
 
 import json
-from abc import ABC, abstractmethod
-from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
-from typing import Optional, Type
-
-import aiofiles
+from typing import Type
+import redis
 from loguru import logger
-from sqlmodel import SQLModel, Field, select, col
-from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.pool import StaticPool
+from pydantic import BaseModel
 
 from app.models.inference_models import InferenceResponseModel
 from app.models.raw_xml_upload_models import RawXMLMergeResponseModel
 from app.models.evaluation_models import EvaluationResponseModel
-from pydantic import BaseModel
 
 
-# -----------------------------
-# Registry of job models
-# -----------------------------
+_REDIS_HASH_KEY = "inference:statuses"
+
 
 JOB_MODELS: dict[str, Type[BaseModel]] = {
     "inference": InferenceResponseModel,
@@ -46,235 +30,121 @@ JOB_MODELS: dict[str, Type[BaseModel]] = {
 }
 
 
-# -----------------------------
-# SQLModel Table
-# -----------------------------
+class RedisStatusRepository:
+    """
+    Status repository backed by a Redis Hash.
 
-class JobStatusDB(SQLModel, table=True):
-    __tablename__ = "job_status"
+    Shared by:
+    - FastAPI process
+    - Celery worker process
+    - Celery signal handlers
+    """
 
-    request_id: str = Field(primary_key=True, index=True)
-    job_type: str = Field(index=True)
-    source: str = Field(index=True)
-
-    state: str = Field(index=True)
-    created_at: str = Field(index=True)
-    runtime_seconds: float = Field(default=0.0)
-
-    payload_json: str
-
-    updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
-
-
-# -----------------------------
-# Abstract repository
-# -----------------------------
-
-class StatusRepository(ABC):
-    @abstractmethod
-    async def save(self, status) -> None:
-        pass
-
-    @abstractmethod
-    async def get_by_id(self, request_id: str):
-        pass
-
-    @abstractmethod
-    async def get_all(self, job_type: Optional[str] = None):
-        pass
-
-    @abstractmethod
-    async def export_to_json(self, output_path: Path, job_type: Optional[str] = None):
-        pass
-
-    @abstractmethod
-    async def close(self) -> None:
-        pass
-
-
-# -----------------------------
-# SQLModel repository
-# -----------------------------
-
-class SQLModelStatusRepository(StatusRepository):
-    def __init__(self, db_path: Path):
-        self.db_path = db_path
-        self._initialized = False
-
-        url = f"sqlite+aiosqlite:///{db_path}"
-        self.engine = create_async_engine(
-            url,
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
+    def __init__(self, redis_url: str):
+        self._redis: redis.Redis[str] = redis.Redis.from_url(
+            redis_url,
+            decode_responses=True,
         )
-        logger.info(f"SQLModel engine created for {db_path}")
+        self._redis.ping()
 
-    async def _init_db(self):
-        if self._initialized:
-            return
-        async with self.engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
-        self._initialized = True
-        logger.info(f"Database initialized at {self.db_path}")
-
-    @staticmethod
-    def _pydantic_to_db(status) -> JobStatusDB:
-        return JobStatusDB(
-            request_id=status.request_id,
-            job_type=status.job_type,
-            source=status.source,
-            state=status.state.value,
-            created_at=status.created_at.isoformat(),
-            runtime_seconds=status.runtime_seconds,
-            payload_json=status.model_dump_json(by_alias=True),
-            updated_at=datetime.now().isoformat(),
+        count = self._redis.hlen(_REDIS_HASH_KEY)
+        logger.info(
+            f"Initialized RedisStatusRepository "
+            f"({count} existing records) at {redis_url}"
         )
 
-    @staticmethod
-    def _db_to_pydantic(db_row: JobStatusDB):
-        model = JOB_MODELS.get(db_row.job_type)
+    def save(self, status: BaseModel) -> None:
+        """Save or update a job status in Redis."""
+        self._redis.hset(
+            _REDIS_HASH_KEY,
+            key=status.request_id,
+            value=status.model_dump_json(by_alias=True),
+        )
+
+        logger.info(
+            "Saved job status | request_id={} | job_type={} | state={}",
+            status.request_id,
+            status.job_type,
+            status.state.value,
+        )
+
+    def get_by_id(self, request_id: str) -> BaseModel | None:
+        """Retrieve a single status by request ID."""
+        data = self._redis.hget(_REDIS_HASH_KEY, request_id)
+
+        if not data:
+            logger.warning(f"No status found for request {request_id}")
+            return None
+
+        raw = json.loads(data)
+        job_type = raw.get("job_type")
+
+        model = JOB_MODELS.get(job_type)
         if not model:
-            raise ValueError(f"Unknown job_type in DB: {db_row.job_type}")
-        return model.model_validate(json.loads(db_row.payload_json))
+            raise ValueError(f"Unknown job_type in Redis: {job_type}")
 
-    async def save(self, status):
-        await self._init_db()
+        return model.model_validate(raw)
 
-        db_status = self._pydantic_to_db(status)
+    def get_all(self, job_type: str | None = None) -> list[BaseModel]:
+        """Retrieve all statuses, optionally filtered by job_type."""
+        all_values = self._redis.hvals(_REDIS_HASH_KEY)
 
-        async with AsyncSession(self.engine) as session:
-            existing = await session.get(JobStatusDB, status.request_id)
+        if not all_values:
+            logger.warning("No statuses found")
+            return []
 
-            if existing:
-                for key, value in db_status.model_dump().items():
-                    setattr(existing, key, value)
-                db_status = existing
+        statuses = []
 
-            session.add(db_status)
-            await session.commit()
+        for value in all_values:
+            raw = json.loads(value)
 
-        logger.info(
-            "Saved job status | request_id=%s | job_type=%s | state=%s",
-            status.request_id,
-            status.job_type,
-            status.state.value,
-        )
+            if job_type and raw.get("job_type") != job_type:
+                continue
 
-    async def get_by_id(self, request_id: str):
-        await self._init_db()
-        async with AsyncSession(self.engine) as session:
-            row = await session.get(JobStatusDB, request_id)
-            if not row:
-                return None
-            return self._db_to_pydantic(row)
-
-    async def get_all(self, job_type: Optional[str] = None):
-        await self._init_db()
-        async with AsyncSession(self.engine) as session:
-            stmt = select(JobStatusDB)
-            if job_type:
-                stmt = stmt.where(JobStatusDB.job_type == job_type)
-            stmt = stmt.order_by(col(JobStatusDB.created_at).desc())
-            rows = (await session.execute(stmt)).scalars().all()
-
-            return [self._db_to_pydantic(row) for row in rows]
-
-    async def export_to_json(self, output_path: Path, job_type: Optional[str] = None):
-        data = await self.get_all(job_type)
-        payload = [s.model_dump(by_alias=True, mode="json") for s in data]
-        async with aiofiles.open(output_path, "w", encoding="utf-8") as f:
-            await f.write(json.dumps(payload, indent=2, ensure_ascii=False))
-
-    async def close(self):
-        await self.engine.dispose()
-        logger.info(f"SQLModel engine disposed for {self.db_path}")
-
-
-# -----------------------------
-# JSON repository
-# -----------------------------
-
-class JSONStatusRepository(StatusRepository):
-    def __init__(self, path: Path):
-        self.path = path
-        if not path.exists():
-            path.write_text("[]", encoding="utf-8")
-            logger.info(f"Created new JSON file at {self.path}")
-
-    async def _read(self):
-        async with aiofiles.open(self.path, "r", encoding="utf-8") as f:
-            return json.loads(await f.read())
-
-    async def _write(self, data):
-        async with aiofiles.open(self.path, "w", encoding="utf-8") as f:
-            await f.write(json.dumps(data, indent=2, ensure_ascii=False))
-
-    async def save(self, status):
-        data = await self._read()
-
-        # Use JSON-safe Pydantic serialization, just like SQL backend
-        payload = json.loads(status.model_dump_json(by_alias=True))
-
-        data = [d for d in data if d["request_id"] != status.request_id]
-        data.append(payload)
-
-        await self._write(data)
-
-        logger.info(
-            "Saved job status | request_id=%s | job_type=%s | state=%s",
-            status.request_id,
-            status.job_type,
-            status.state.value,
-        )
-
-    async def get_by_id(self, request_id: str):
-        for row in await self._read():
-            if row["request_id"] == request_id:
-                model = JOB_MODELS.get(row["job_type"])
-                if not model:
-                    raise ValueError(f"Unknown job_type in JSON: {row['job_type']}")
-                return model(**row)
-        return None
-
-    async def get_all(self, job_type: Optional[str] = None):
-        rows = await self._read()
-
-        # Match SQL ordering: newest first
-        rows = sorted(rows, key=lambda r: r.get("created_at", ""), reverse=True)
-
-        if job_type:
-            rows = [r for r in rows if r["job_type"] == job_type]
-
-        result = []
-        for row in rows:
-            model = JOB_MODELS.get(row["job_type"])
+            model = JOB_MODELS.get(raw.get("job_type"))
             if not model:
-                raise ValueError(f"Unknown job_type in JSON: {row['job_type']}")
-            result.append(model(**row))
-        return result
+                raise ValueError(f"Unknown job_type in Redis: {raw.get('job_type')}")
 
-    async def export_to_json(self, output_path: Path, job_type: Optional[str] = None):
-        data = await self.get_all(job_type)
-        payload = [s.model_dump(by_alias=True, mode="json") for s in data]
+            statuses.append(model.model_validate(raw))
 
-        async with aiofiles.open(output_path, "w", encoding="utf-8") as f:
-            await f.write(json.dumps(payload, indent=2, ensure_ascii=False))
+        return sorted(
+            statuses,
+            key=lambda s: s.created_at,
+            reverse=True,
+        )
 
-    async def close(self):
-        logger.info(f"Closing JSON repository at {self.path}")
+    def export_to_json(
+        self,
+        output_path: Path,
+        job_type: str | None = None,
+    ) -> None:
+        """Export all or filtered statuses to JSON."""
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        statuses = self.get_all(job_type=job_type)
+        payload = [
+            status.model_dump(by_alias=True, mode="json")
+            for status in statuses
+        ]
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
+
+        logger.info(f"Exported {len(payload)} statuses to {output_path}")
+
+    def ping(self) -> bool:
+        """Check Redis connectivity."""
+        try:
+            return bool(self._redis.ping())
+        except redis.ConnectionError:
+            return False
+
+    def close(self) -> None:
+        """Close Redis connection."""
+        self._redis.close()
+        logger.info("Redis connection closed")
 
 
-# -----------------------------
-# Factory
-# -----------------------------
-
-def create_repository(storage_type: str = "sqlite", path: Path | None = None) -> StatusRepository:
-    if path is None:
-        path = Path("job-status.db" if storage_type == "sqlite" else "job-status.json")
-
-    if storage_type == "sqlite":
-        return SQLModelStatusRepository(path)
-    elif storage_type == "json":
-        return JSONStatusRepository(path)
-    else:
-        raise ValueError(f"Unknown storage type: {storage_type}")
+@lru_cache(maxsize=1)
+def get_redis_repository(redis_url: str) -> RedisStatusRepository:
+    return RedisStatusRepository(redis_url=redis_url)
