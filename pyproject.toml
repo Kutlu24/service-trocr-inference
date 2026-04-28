@@ -26,17 +26,17 @@ classifiers = [
 license = "MIT"
 
 dependencies = [
-    "aiofiles>=24.1.0",
-    "aiosqlite>=0.22.1",
+    "celery>=5.4.0",
     "fastapi[standard-no-fastapi-cloud-cli]>=0.109.1",
     "flow-inference",
     "loguru>=0.7.3",
     "pydantic>=2.11.4",
     "pydantic-core>=2.14,<3",
+    "pydantic-settings>=2.8.1",
     "python-dotenv>=1.0",
+    "redis>=5.0.0",
     "slowapi>=0.1.9",
-    "sqlmodel>=0.0.22",
-    "uvicorn[standard]>=0.37,<0.39"
+    "uvicorn[standard]>=0.37,<0.39",
 ]
 
 keywords = [
