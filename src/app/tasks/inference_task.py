@@ -1,26 +1,53 @@
 import os
 import threading
-import time
-from flow_inference.inference import Inference
-from app.models.inference_models import InferenceResponseModel, StateEnum
-from app.storage import StatusRepository
 from loguru import logger
+from app.celery_app import celery_app
+from app.models.inference_models import InferenceResponseModel
+from flow_inference.inference import Inference
 
+@celery_app.task(
+    bind=True,
+    name="app.tasks.inference_task",
+    max_retries=3,
+    retry_backoff=True,
+    time_limit=3600,
+    soft_time_limit=3300,
+)
+def inference_task(
+    self,
+    status_dict: dict,
+    huggingface_token: str | None = None,
+) -> dict:
+    try:
+        return _run_inference(status_dict, huggingface_token)
 
-async def inference_task(
-    repository: StatusRepository,
-    huggingface_token: str | None,
-    created_status: InferenceResponseModel,
-):
+    except MemoryError:
+        logger.exception("Memory error, do not retry")
+        raise
+
+    except Exception as e:
+        logger.exception(f"Inference failed for request: {e}")
+
+        if "Cannot allocate memory" in str(e):
+            logger.error("OOM error in task, will not retry")
+            raise
+
+        raise self.retry(exc=e)
+
+def _run_inference(
+    status_dict: dict,
+    huggingface_token: str | None = None,
+) -> dict:
+    status = InferenceResponseModel.model_validate(status_dict)
 
     logger.info(
-        "Inference task started | request_id=%s | pid=%s | thread=%s",
-        created_status.request_id,
+        "Inference task started | request_id={} | pid={} | thread={}",
+        status.request_id,
         os.getpid(),
         threading.current_thread().name,
     )
 
-    params = created_status.model_dump(
+    params = status.model_dump(
         by_alias=True,
         include={
             "upload_repo_name",
@@ -30,72 +57,19 @@ async def inference_task(
             "stop_on_fail",
             "splits",
             "push_to_hub",
-        }
+        },
     )
 
-    logger.info("Inference params: %s", params)
-    logger.info(
-        "HF source=%s | upload repo=%s | push_to_hub=%s | token_present=%s",
-        created_status.source,
-        params.get("upload_repo_name"),
-        params.get("push_to_hub"),
-        bool(huggingface_token),
+    worker = Inference(
+        download_repo_name=status.source,
+        hf_token=huggingface_token,
+        **params,
     )
 
-    try:
-        worker = Inference(
-            download_repo_name=created_status.source,
-            hf_token=huggingface_token,
-            **params,
-        )
-        logger.info("Inference object created")
-    except Exception:
-        logger.exception("Failed to construct Inference object")
-        created_status.state = StateEnum.FAILED
-        await repository.save(created_status)
-        raise
+    result = worker.perform_inference()
 
-    start = time.time()
+    total_records = 0
+    if hasattr(result, "total_records"):
+        total_records = result.total_records
 
-    try:
-        logger.info("Starting inference")
-        result = worker.perform_inference()
-        elapsed = time.time() - start
-
-        # If your worker returns statistics, attach them here
-        if hasattr(result, "total_records"):
-            created_status.total_records = result.total_records
-
-        created_status.state = StateEnum.DONE
-        created_status.runtime_seconds = elapsed
-
-        logger.info(
-            "Inference finished successfully in %.2fs | records=%s",
-            elapsed,
-            created_status.total_records,
-        )
-
-    except Exception as e:
-        elapsed = time.time() - start
-        created_status.state = StateEnum.FAILED
-        created_status.runtime_seconds = elapsed
-
-        logger.exception(
-            "Inference failed after %.2fs | error=%s",
-            elapsed,
-            str(e),
-        )
-
-        await repository.save(created_status)
-
-        if created_status.stop_on_fail:
-            raise
-        return
-
-    await repository.save(created_status)
-
-    logger.info(
-        "Final inference status saved | request_id=%s | state=%s",
-        created_status.request_id,
-        created_status.state,
-    )
+    return {"total_records": total_records}
