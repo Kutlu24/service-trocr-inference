@@ -99,10 +99,16 @@ async def start_inference(
     huggingface_token = params.huggingface_token
 
     status_obj = InferenceResponseModel(
-        **params.model_dump(
-            by_alias=True,
-            exclude={"huggingface_token"},
-        )
+        source=params.huggingface_repo_name,
+        upload_repo_name=params.upload_repo_name,
+        private_repo=params.private_repo,
+        trocr_model=params.trocr_model,
+        target_image_size=params.target_image_size,
+        stop_on_fail=params.stop_on_fail,
+        splits=params.splits,
+        push_to_hub=params.push_to_hub,
+        upload_mode=params.upload_mode,
+        allow_source_repo_update=params.allow_source_repo_update,
     )
 
     repository.save(status_obj)
@@ -234,6 +240,9 @@ async def start_xml_merge(
         source_raw_repo=params.raw_xml_repo,
         source_inference_repo=params.inference_repo,
         output_repo_name=params.output_repo_name or params.raw_xml_repo,
+        private_repo=params.private_repo,
+        upload_mode=params.upload_mode,
+        allow_source_repo_update=params.allow_source_repo_update,
     )
 
     repository.save(status_obj)

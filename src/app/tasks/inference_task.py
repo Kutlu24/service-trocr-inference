@@ -9,7 +9,9 @@ from flow_inference.inference import Inference
     bind=True,
     name="app.tasks.inference_task",
     max_retries=3,
-    retry_backoff=True,
+    retry_backoff=30,
+    retry_backoff_max=120,
+    retry_jitter=True,
     time_limit=3600,
     soft_time_limit=3300,
 )
@@ -57,6 +59,8 @@ def _run_inference(
             "stop_on_fail",
             "splits",
             "push_to_hub",
+            "upload_mode",
+            "allow_source_repo_update",
         },
     )
 
@@ -69,7 +73,7 @@ def _run_inference(
     result = worker.perform_inference()
 
     total_records = 0
-    if hasattr(result, "total_records"):
-        total_records = result.total_records
+    if isinstance(result, dict):
+        total_records = sum(len(df) for df in result.values())
 
     return {"total_records": total_records}

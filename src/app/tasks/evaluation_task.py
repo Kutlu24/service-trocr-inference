@@ -7,7 +7,9 @@ from flow_inference.evaluation import Evaluation
     bind=True,
     name="app.tasks.evaluation_task",
     max_retries=3,
-    retry_backoff=True,
+    retry_backoff=30,
+    retry_backoff_max=120,
+    retry_jitter=True,
     time_limit=3600,
     soft_time_limit=3300,
 )

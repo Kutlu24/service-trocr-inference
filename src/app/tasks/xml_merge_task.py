@@ -7,7 +7,9 @@ from flow_inference.write_inference_to_raw_xml import InferenceToRawXMLWriter
     bind=True,
     name="app.tasks.xml_merge_task",
     max_retries=3,
-    retry_backoff=True,
+    retry_backoff=30,
+    retry_backoff_max=120,
+    retry_jitter=True,
     time_limit=3600,
     soft_time_limit=3300,
 )
@@ -53,10 +55,13 @@ def _run_xml_merge(
         raw_xml_repo=status.source_raw_repo,
         inference_repo=status.source_inference_repo,
         token=huggingface_token,
+        allow_source_repo_update=status.allow_source_repo_update,
     )
 
     result = worker.process_and_upload(
         output_repo=status.output_repo_name,
+        upload_mode=status.upload_mode,
+        private=status.private_repo,
     )
 
     if isinstance(result, dict):
