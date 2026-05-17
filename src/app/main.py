@@ -44,12 +44,16 @@ async def rate_limit_handler(
         content={"detail": "Rate limit exceeded"},
     )
 
-async def check_api_key(api_key: str | None = Security(api_key_header)):
+async def check_api_key(api_key: str | None = Security(api_key_header)) -> None:
     env_api_key = settings.API_KEY
 
-    if env_api_key and (
-        not api_key or not secrets.compare_digest(api_key, env_api_key)
-    ):
+    if not env_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Server configuration error",
+        )
+
+    if not api_key or not secrets.compare_digest(api_key, env_api_key):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API Key",
