@@ -1,7 +1,6 @@
 from typing import Annotated, Literal
 from app.models.shared_models import JobStatusBase
-
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, SecretStr
 
 
 UploadMode = Literal["new_repo", "replace", "update"]
@@ -30,7 +29,7 @@ class RawXMLMergeRequestModel(BaseModel):
         json_schema_extra={"example": "my-org/my-dataset-with-inference"},
     )]
 
-    huggingface_token: Annotated[str | None, Field(
+    huggingface_token: Annotated[SecretStr | None, Field(
         default=None,
         alias="huggingface_token",
         description=(

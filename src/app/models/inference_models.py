@@ -6,6 +6,7 @@ from pydantic import (
     Field,
     ConfigDict,
     PositiveInt,
+    SecretStr
 )
 
 # -----------------------------
@@ -102,7 +103,7 @@ class InferenceBaseModel(BaseModel):
 # -----------------------------
 
 class InferenceRequestModel(InferenceBaseModel):
-    huggingface_token: Annotated[str | None, Field(
+    huggingface_token: Annotated[SecretStr | None, Field(
         default=None,
         alias="huggingface_token",
         description=(

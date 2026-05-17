@@ -96,7 +96,11 @@ async def start_inference(
     params: InferenceRequestModel = Body(...),
     repository: RedisStatusRepository = Depends(get_repository),
 ) -> InferenceResponseModel:
-    huggingface_token = params.huggingface_token
+    huggingface_token = (
+        params.huggingface_token.get_secret_value()
+        if params.huggingface_token
+        else None
+    )
 
     status_obj = InferenceResponseModel(
         source=params.huggingface_repo_name,
@@ -173,6 +177,11 @@ async def start_hf_evaluation(
     status_obj = EvaluationResponseModel(
         source=params.huggingface_repo_name,
     )
+    huggingface_token = (
+        params.huggingface_token.get_secret_value()
+        if params.huggingface_token
+        else None
+    )
 
     repository.save(status_obj)
 
@@ -182,7 +191,7 @@ async def start_hf_evaluation(
                 by_alias=True,
                 mode="json",
             ),
-            "huggingface_token": params.huggingface_token,
+            "huggingface_token": huggingface_token,
             "splits": params.splits,
         },
         task_id=status_obj.request_id,
@@ -247,13 +256,19 @@ async def start_xml_merge(
 
     repository.save(status_obj)
 
+    huggingface_token = (
+        params.huggingface_token.get_secret_value()
+        if params.huggingface_token
+        else None
+    )
+
     xml_merge_task.apply_async(
         kwargs={
             "status_dict": status_obj.model_dump(
                 by_alias=True,
                 mode="json",
             ),
-            "huggingface_token": params.huggingface_token,
+            "huggingface_token": huggingface_token,
         },
         task_id=status_obj.request_id,
     )
