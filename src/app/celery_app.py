@@ -128,8 +128,20 @@ def task_failure_handler(task_id=None, exception=None, sender=None, **kwargs):
 
 
 @task_retry.connect
-def task_retry_handler(task_id=None, reason=None, **kwargs):
+def task_retry_handler(request=None, reason=None, einfo=None, sender=None, **kwargs):
     """Fire when task retries."""
+    task_id = getattr(request, "id", None)
+
+    if task_id is None and sender is not None:
+        task_id = getattr(getattr(sender, "request", None), "id", None)
+
+    if task_id is None:
+        logger.warning(
+            "Task retry signal received without task id; skipping status update. "
+            f"request={request!r}, sender={sender!r}, reason={reason!r}"
+        )
+        return
+
     logger.info(f"Task {task_id} retry")
 
     task = redis_repository.get_by_id(task_id)

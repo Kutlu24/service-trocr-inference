@@ -3,6 +3,9 @@ from app.celery_app import celery_app
 from app.models.evaluation_models import EvaluationResponseModel
 from flow_inference.evaluation import Evaluation
 
+from app.tasks.retry_utils import is_retryable_error
+
+
 @celery_app.task(
     bind=True,
     name="app.tasks.evaluation_task",
@@ -37,7 +40,12 @@ def evaluation_task(
             logger.error("OOM error in task, will not retry")
             raise
 
-        raise self.retry(exc=e)
+        if is_retryable_error(e):
+            logger.warning("Transient evaluation error detected; retrying task.")
+            raise self.retry(exc=e)
+
+        logger.error("Non-retryable evaluation error; failing task without retry.")
+        raise
 
 def _run_evaluation(
     status_dict: dict,

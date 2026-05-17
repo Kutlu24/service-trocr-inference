@@ -3,6 +3,9 @@ from app.celery_app import celery_app
 from app.models.raw_xml_upload_models import RawXMLMergeResponseModel
 from flow_inference.write_inference_to_raw_xml import InferenceToRawXMLWriter
 
+from app.tasks.retry_utils import is_retryable_error
+
+
 @celery_app.task(
     bind=True,
     name="app.tasks.xml_merge_task",
@@ -35,7 +38,12 @@ def xml_merge_task(
             logger.error("OOM error in task, will not retry")
             raise
 
-        raise self.retry(exc=e)
+        if is_retryable_error(e):
+            logger.warning("Transient XML merge error detected; retrying task.")
+            raise self.retry(exc=e)
+
+        logger.error("Non-retryable XML merge error; failing task without retry.")
+        raise
 
 
 def _run_xml_merge(

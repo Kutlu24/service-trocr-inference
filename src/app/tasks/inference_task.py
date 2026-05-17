@@ -5,6 +5,9 @@ from app.celery_app import celery_app
 from app.models.inference_models import InferenceResponseModel
 from flow_inference.inference import Inference
 
+from app.tasks.retry_utils import is_retryable_error
+
+
 @celery_app.task(
     bind=True,
     name="app.tasks.inference_task",
@@ -34,7 +37,12 @@ def inference_task(
             logger.error("OOM error in task, will not retry")
             raise
 
-        raise self.retry(exc=e)
+        if is_retryable_error(e):
+            logger.warning("Transient inference error detected; retrying task.")
+            raise self.retry(exc=e)
+
+        logger.error("Non-retryable inference error; failing task without retry.")
+        raise
 
 def _run_inference(
     status_dict: dict,
