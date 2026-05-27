@@ -1,0 +1,48 @@
+# docker-compose.traefik-proxy.yml
+#
+# Shared Traefik reverse proxy – run ONCE per machine, not per app.
+#
+# Setup on a fresh host:
+#   docker network create traefik_net
+#   docker compose -f docker-compose.traefik-proxy.yml up -d
+#
+# Required .env variables:
+#   ACME_EMAIL – e-mail address for Let's Encrypt notifications
+
+services:
+  traefik:
+    image: traefik:v3
+    container_name: traefik-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=traefik_net"
+
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.web.http.redirections.entrypoint.permanent=true"
+
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "letsencrypt-data:/letsencrypt"
+    networks:
+      - traefik_net
+
+volumes:
+  letsencrypt-data:
+    driver: local
+
+networks:
+  traefik_net:
+    external: true
