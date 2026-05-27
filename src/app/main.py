@@ -309,3 +309,21 @@ async def get_xml_merge_status(
         raise HTTPException(404, "XML merge job not found")
 
     return cast(RawXMLMergeResponseModel, status_obj)
+
+@app.get("/health")
+@limiter.limit("4/minute")
+def health_check(request: Request):
+    repository_status = "not_initialized"
+
+    try:
+        if hasattr(request.app.state, "repository") and request.app.state.repository is not None:
+            repository_status = "initialized"
+    except Exception:
+        repository_status = "error"
+
+    return {
+        "status": "healthy" if repository_status == "initialized" else "degraded",
+        "service": "service-trocr-inference",
+        "repository": repository_status,
+        "redis_url": settings.REDIS_URL,
+    }
