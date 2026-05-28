@@ -3,8 +3,6 @@ services:
   redis:
     image: redis:7-alpine
     container_name: inference-redis
-    ports:
-      - "6379:6379"
     volumes:
       - redis-data:/data
     restart: unless-stopped
@@ -22,14 +20,13 @@ services:
       dockerfile: Dockerfile
       args:
         TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
-    pull_policy: missing
     container_name: service-trocr-inference
     ports:
-      - "8000:8000"
+      - "8001:8000"
     env_file:
       - .env
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      - redis_url=redis://redis:6379/0
     depends_on:
       redis:
         condition: service_healthy
@@ -50,13 +47,12 @@ services:
       dockerfile: Dockerfile
       args:
         TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
-    pull_policy: missing
     container_name: inference-celery-worker
-    command: celery -A app.celery_app.celery_app worker --loglevel=${LOG_LEVEL:-INFO} --concurrency=2
+    command: celery -A app.celery_app.celery_app worker --loglevel=${LOG_LEVEL:-INFO} --concurrency=1
     env_file:
       - .env
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      - redis_url=redis://redis:6379/0
     depends_on:
       redis:
         condition: service_healthy
