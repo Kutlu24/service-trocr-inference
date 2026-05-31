@@ -4,6 +4,8 @@ from app.models.raw_xml_upload_models import RawXMLMergeResponseModel
 from flow_inference.write_inference_to_raw_xml import InferenceToRawXMLWriter
 
 from app.tasks.retry_utils import is_retryable_error
+from datetime import datetime, UTC
+from app.tasks.status_upload import upload_status_to_huggingface
 
 
 @celery_app.task(
@@ -50,6 +52,8 @@ def _run_xml_merge(
     status_dict: dict,
     huggingface_token: str | None = None,
 ) -> dict:
+    started_at = datetime.now(UTC)
+
     status = RawXMLMergeResponseModel.model_validate(status_dict)
 
     logger.info(
@@ -73,8 +77,17 @@ def _run_xml_merge(
     )
 
     if isinstance(result, dict):
-        return {
+        result_updates = {
             "updated_records": result.get("updated_records", 0),
         }
+    else:
+        result_updates = {}
 
-    return {}
+    upload_status_to_huggingface(
+        status=status,
+        huggingface_token=huggingface_token,
+        result_updates=result_updates,
+        started_at=started_at,
+    )
+
+    return result_updates

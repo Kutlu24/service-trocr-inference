@@ -6,6 +6,8 @@ from app.models.inference_models import InferenceResponseModel
 from flow_inference.inference import Inference
 
 from app.tasks.retry_utils import is_retryable_error
+from app.tasks.status_upload import upload_status_to_huggingface
+from datetime import datetime, UTC
 
 
 @celery_app.task(
@@ -48,6 +50,8 @@ def _run_inference(
     status_dict: dict,
     huggingface_token: str | None = None,
 ) -> dict:
+    started_at = datetime.now(UTC)
+
     status = InferenceResponseModel.model_validate(status_dict)
 
     logger.info(
@@ -84,4 +88,15 @@ def _run_inference(
     if isinstance(result, dict):
         total_records = sum(len(df) for df in result.values())
 
-    return {"total_records": total_records}
+    result_updates = {
+        "total_records": total_records,
+    }
+
+    upload_status_to_huggingface(
+        status=status,
+        huggingface_token=huggingface_token,
+        result_updates=result_updates,
+        started_at=started_at,
+    )
+
+    return result_updates

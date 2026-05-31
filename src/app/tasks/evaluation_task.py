@@ -4,6 +4,8 @@ from app.models.evaluation_models import EvaluationResponseModel
 from flow_inference.evaluation import Evaluation
 
 from app.tasks.retry_utils import is_retryable_error
+from datetime import datetime, UTC
+from app.tasks.status_upload import upload_status_to_huggingface
 
 
 @celery_app.task(
@@ -52,6 +54,8 @@ def _run_evaluation(
     huggingface_token: str | None = None,
     splits: list[str] | None = None,
 ) -> dict:
+    started_at = datetime.now(UTC)
+
     status = EvaluationResponseModel.model_validate(status_dict)
 
     worker = Evaluation(
@@ -63,10 +67,19 @@ def _run_evaluation(
     result = worker.perform_evaluation()
 
     if isinstance(result, dict):
-        return {
+        result_updates = {
             "cer": result.get("cer"),
             "gt_lines": result.get("gt_lines"),
             "hypothesis_lines": result.get("hypothesis_lines"),
         }
+    else:
+        result_updates = {}
 
-    return {}
+    upload_status_to_huggingface(
+        status=status,
+        huggingface_token=huggingface_token,
+        result_updates=result_updates,
+        started_at=started_at,
+    )
+
+    return result_updates
