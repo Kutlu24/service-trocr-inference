@@ -1,25 +1,21 @@
+# CUDA_RUNTIME_IMAGE must be declared before the first FROM to be usable in FROM statements
+ARG CUDA_RUNTIME_IMAGE=nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+
 # ================================
 # Stage 1: Builder
 # ================================
-FROM python:3.12-slim-bookworm AS builder
+FROM astral/uv:python3.12-bookworm-slim AS builder
 
-# Set environment variables for build
+ARG TORCH_VERSION=2.7.1
+ARG TORCHVISION_VERSION=0.22.1
+ARG TORCH_VARIANT=cpu
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    UV_SYSTEM_PYTHON=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_CACHE_DIR=/root/.cache/uv
 
-# Torch variant: "cpu" default, or CUDA variants like "cu128", "cu126", "cu124".
-# Example:
-#   docker compose build --build-arg TORCH_VARIANT=cu128
-ARG TORCH_VARIANT=cpu
-
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:0.10.11 /uv /usr/local/bin/uv
-
-# Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && apt-get clean \
@@ -27,38 +23,38 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy dependency files
 COPY pyproject.toml uv.lock /app/
 
-# Install dependencies only, not the local package
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-workspace
 
-# Optionally replace torch/torchvision with CUDA wheels
 RUN --mount=type=cache,target=/root/.cache/uv \
-    if [ "${TORCH_VARIANT}" != "cpu" ]; then \
+    if [ "${TORCH_VARIANT}" = "cpu" ]; then \
+        echo "Installing CPU torch variant" && \
+        uv pip install \
+            "torch==${TORCH_VERSION}+cpu" \
+            "torchvision==${TORCHVISION_VERSION}+cpu" \
+            --index-url "https://download.pytorch.org/whl/cpu" \
+            --force-reinstall; \
+    else \
         echo "Installing GPU torch variant: ${TORCH_VARIANT}" && \
         uv pip install \
-            "torch==2.7.1+${TORCH_VARIANT}" \
-            "torchvision==0.22.1+${TORCH_VARIANT}" \
+            "torch==${TORCH_VERSION}+${TORCH_VARIANT}" \
+            "torchvision==${TORCHVISION_VERSION}+${TORCH_VARIANT}" \
             --index-url "https://download.pytorch.org/whl/${TORCH_VARIANT}" \
-            --no-deps; \
+            --force-reinstall; \
     fi
 
-
 # ================================
-# Stage 2: Runtime
+# Stage 2a: CPU Runtime
 # ================================
-FROM python:3.12-slim-bookworm AS runtime
+FROM python:3.12-slim-bookworm AS runtime-cpu
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app/src \
     PATH="/app/.venv/bin:$PATH"
 
-# Runtime dependencies.
-# libgl/libglib etc. are useful for image/PIL/OpenCV-style dependencies.
-# curl is needed for Docker HEALTHCHECK.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
@@ -73,18 +69,56 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy virtual environment from builder
 COPY --from=builder /app/.venv /app/.venv
-
-# Copy application code
 COPY ./src /app/src
 
 EXPOSE 8000
 
-# Requires /health endpoint in app.main
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Default command for the FastAPI API container.
-# The Celery worker container overrides this in docker-compose.yml.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# ================================
+# Stage 2b: GPU Runtime
+# ================================
+FROM ${CUDA_RUNTIME_IMAGE} AS runtime-gpu
+
+ARG CUDA_CUPTI_PKG_VERSION=12-4
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 \
+    python3.12-venv \
+    libgl1 \
+    libglib2.0-0 \
+    libgomp1 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    curl \
+    cuda-cupti-${CUDA_CUPTI_PKG_VERSION} \
+    && ln -sf /usr/bin/python3.12 /usr/local/bin/python \
+    && ln -sf /usr/bin/python3.12 /usr/local/bin/python3 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /var/cache/apt/*
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/src \
+    PATH="/app/.venv/bin:$PATH"
+
+WORKDIR /app
+
+COPY --from=builder /app/.venv /app/.venv
+COPY ./src /app/src
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

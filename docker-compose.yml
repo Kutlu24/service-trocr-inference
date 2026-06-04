@@ -18,8 +18,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: runtime-cpu
       args:
-        TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
+        TORCH_VARIANT: cpu
     container_name: service-trocr-inference
     ports:
       - "8001:8000"
@@ -45,8 +46,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: runtime-cpu
       args:
-        TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
+        TORCH_VARIANT: cpu
     container_name: inference-celery-worker
     command: celery -A app.celery_app.celery_app worker --loglevel=${LOG_LEVEL:-INFO} --concurrency=1
     env_file:

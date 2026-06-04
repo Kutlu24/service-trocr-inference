@@ -1,0 +1,41 @@
+# docker-compose.gpu.yml
+#
+# GPU override. Use together with docker-compose.traefik.yml:
+# docker compose -f docker-compose.traefik.yml -f docker-compose.gpu.yml up -d --build
+
+services:
+  trocr-inference:
+    build:
+      target: runtime-gpu
+      args:
+        TORCH_VERSION: ${TORCH_VERSION:-2.7.1}
+        TORCHVISION_VERSION: ${TORCHVISION_VERSION:-0.22.1}
+        TORCH_VARIANT: ${TORCH_VARIANT:-cu124}
+        CUDA_RUNTIME_IMAGE: ${CUDA_RUNTIME_IMAGE:-nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04}
+        CUDA_CUPTI_PKG_VERSION: ${CUDA_CUPTI_PKG_VERSION:-12-4}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities:
+                - gpu
+
+  celery-worker:
+    build:
+      target: runtime-gpu
+      args:
+        TORCH_VERSION: ${TORCH_VERSION:-2.7.1}
+        TORCHVISION_VERSION: ${TORCHVISION_VERSION:-0.22.1}
+        TORCH_VARIANT: ${TORCH_VARIANT:-cu124}
+        CUDA_RUNTIME_IMAGE: ${CUDA_RUNTIME_IMAGE:-nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04}
+        CUDA_CUPTI_PKG_VERSION: ${CUDA_CUPTI_PKG_VERSION:-12-4}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities:
+                - gpu

@@ -32,8 +32,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: runtime-cpu
       args:
+        TORCH_VERSION: ${TORCH_VERSION:-2.7.1}
+        TORCHVISION_VERSION: ${TORCHVISION_VERSION:-0.22.1}
         TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
+        CUDA_RUNTIME_IMAGE: ${CUDA_RUNTIME_IMAGE:-nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04}
+        CUDA_CUPTI_PKG_VERSION: ${CUDA_CUPTI_PKG_VERSION:-12-4}
     pull_policy: missing
     container_name: service-trocr-inference
 
@@ -90,7 +95,7 @@ services:
         TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
     pull_policy: missing
     container_name: inference-celery-worker
-    command: celery -A app.celery_app.celery_app worker --loglevel=${LOG_LEVEL:-INFO} --concurrency=2
+    command: celery -A app.celery_app.celery_app worker --loglevel=${LOG_LEVEL:-INFO} --concurrency=${CELERY_CONCURRENCY:-1}
     env_file:
       - .env
     environment:
