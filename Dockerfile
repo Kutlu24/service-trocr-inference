@@ -34,15 +34,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         uv pip install \
             "torch==${TORCH_VERSION}+cpu" \
             "torchvision==${TORCHVISION_VERSION}+cpu" \
-            --index-url "https://download.pytorch.org/whl/cpu" \
-            --force-reinstall; \
+            --index-url "https://download.pytorch.org/whl/cpu"; \
     else \
         echo "Installing GPU torch variant: ${TORCH_VARIANT}" && \
         uv pip install \
             "torch==${TORCH_VERSION}+${TORCH_VARIANT}" \
             "torchvision==${TORCHVISION_VERSION}+${TORCH_VARIANT}" \
-            --index-url "https://download.pytorch.org/whl/${TORCH_VARIANT}" \
-            --force-reinstall; \
+            --index-url "https://download.pytorch.org/whl/${TORCH_VARIANT}"; \
     fi
 
 # ================================
