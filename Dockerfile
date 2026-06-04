@@ -82,7 +82,10 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 # ================================
 FROM ${CUDA_RUNTIME_IMAGE} AS runtime-gpu
 
-ARG CUDA_CUPTI_PKG_VERSION=12-4
+ARG CUDA_CUPTI_PKG_VERSION=12-6
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe/Berlin
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
