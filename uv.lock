@@ -502,7 +502,7 @@ wheels = [
 [[package]]
 name = "flow-inference"
 version = "0.1.0"
-source = { git = "https://github.com/The-Flow-Project/package-trocr-inference.git#1c7aa22c120fb98f2b72a471d97292ea153461ba" }
+source = { git = "https://github.com/The-Flow-Project/package-trocr-inference.git#32be149cae937a2d7e99761a5c539c233ebd15a0" }
 dependencies = [
     { name = "datasets" },
     { name = "evaluate" },
