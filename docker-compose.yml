@@ -15,6 +15,12 @@ x-app: &app
     context: .
     dockerfile: Dockerfile
     target: runtime
+    # Forwarded as --build-arg; env_file below only affects the running
+    # container, not `docker build`, so these need to be passed explicitly.
+    args:
+      TORCH_VERSION: ${TORCH_VERSION:-2.7.1}
+      TORCHVISION_VERSION: ${TORCHVISION_VERSION:-0.22.1}
+      TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
   pull_policy: missing
   env_file:
     - .env
