@@ -32,9 +32,9 @@ ARG TORCH_VARIANT=cpu
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ "${TORCH_VARIANT}" != "cpu" ]; then \
          uv pip install \
-             "torch==${TORCH_VERSION}+${TORCH_VARIANT}" \
-             "torchvision==${TORCHVISION_VERSION}+${TORCH_VARIANT}" \
-             --index-url "https://download.pytorch.org/whl/${TORCH_VARIANT}"; \
+             torch==${TORCH_VERSION} \
+             torchvision==${TORCHVISION_VERSION} \
+             --index-url https://download.pytorch.org/whl/${TORCH_VARIANT}; \
      fi
 
 # ================================
