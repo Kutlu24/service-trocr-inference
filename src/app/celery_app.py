@@ -16,16 +16,15 @@ from app.settings import Settings
 from app.models.shared_models import StateEnum
 from app.storage import get_redis_repository
 
-
 settings = Settings()
 
 celery_app = Celery(
     "service_trocr_inference",
     broker=settings.REDIS_URL,
     include=[
-    "app.tasks.inference_task",
-    "app.tasks.evaluation_task",
-    "app.tasks.xml_merge_task",
+        "app.tasks.inference_task",
+        "app.tasks.evaluation_task",
+        "app.tasks.xml_merge_task",
     ],
     task_serializer="json",
     result_serializer="json",
@@ -37,8 +36,20 @@ celery_app = Celery(
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=1000,
     result_expires=timedelta(hours=48) if settings.is_production else timedelta(hours=1),
-    task_time_limit=3600,
-    task_soft_time_limit=3300,
+    task_time_limit=settings.CELERY_TASK_TIME_LIMIT,
+    task_soft_time_limit=settings.CELERY_TASK_SOFT_TIME_LIMIT,
+    task_default_queue="default",
+    task_routes={
+        # only route to "gpu" when this deployment's image actually has a CUDA
+        # torch build (docker-compose.gpu.yml is the only worker that consumes that queue);
+        # otherwise CPU-only deployments would publish to a queue nobody listens to.
+        "app.tasks.inference_task": {
+            "queue": "gpu" if settings.TORCH_VARIANT != "cpu" else "default",
+        },
+        "app.tasks.evaluation_task": {
+            "queue": "gpu" if settings.TORCH_VARIANT != "cpu" else "default",
+        }
+    },
 )
 
 redis_repository = get_redis_repository(redis_url=settings.REDIS_URL)

@@ -1,41 +1,28 @@
 # docker-compose.gpu.yml
 #
-# GPU override. Use together with docker-compose.traefik.yml:
+# GPU override.
+# Use local GPU for inference and Celery worker. Requires NVIDIA Container Toolkit installed on host.
+
+# Use together with docker-compose.yml:
+# docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+
+# Use together with docker-compose.traefik.yml:
 # docker compose -f docker-compose.traefik.yml -f docker-compose.gpu.yml up -d --build
 
 services:
-  trocr-inference:
-    build:
-      target: runtime-gpu
-      args:
-        TORCH_VERSION: ${TORCH_VERSION:-2.7.1}
-        TORCHVISION_VERSION: ${TORCHVISION_VERSION:-0.22.1}
-        TORCH_VARIANT: ${TORCH_VARIANT:-cu124}
-        CUDA_RUNTIME_IMAGE: ${CUDA_RUNTIME_IMAGE:-nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04}
-        CUDA_CUPTI_PKG_VERSION: ${CUDA_CUPTI_PKG_VERSION:-12-4}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities:
-                - gpu
-
-  celery-worker:
-    build:
-      target: runtime-gpu
-      args:
-        TORCH_VERSION: ${TORCH_VERSION:-2.7.1}
-        TORCHVISION_VERSION: ${TORCHVISION_VERSION:-0.22.1}
-        TORCH_VARIANT: ${TORCH_VARIANT:-cu124}
-        CUDA_RUNTIME_IMAGE: ${CUDA_RUNTIME_IMAGE:-nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04}
-        CUDA_CUPTI_PKG_VERSION: ${CUDA_CUPTI_PKG_VERSION:-12-4}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities:
-                - gpu
+  # --concurrency 1 serializes work so two GPU training jobs can't OOM the card;
+  # raise it only if you accept that risk for more parallel light tasks.
+  inference-celery-worker:
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - OMP_NUM_THREADS=1
+    command: "celery -A app.tasks worker 
+              --loglevel ${LOG_LEVEL:-INFO}
+              --optimization fair
+              --concurrency ${CELERY_CONCURRENCY:-1}
+              --prefetch-multiplier 1
+              --queues default,live,low-priority,gpu
+              --max-tasks-per-child 1"
+    shm_size: '4gb'

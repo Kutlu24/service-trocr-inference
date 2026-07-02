@@ -1,139 +1,26 @@
-# docker-compose.traefik.yml
-#
-# Production setup behind shared Traefik.
-#
-# Usage:
-#   docker compose -f docker-compose.traefik.yml up --build -d
+# docker-compose.traefik.yml — overlay for the shared Traefik proxy.
+#   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d
+# (no --build-arg on `up`; CPU image needs none)
 #
 # Required .env variables:
 #   APP_DOMAIN
-#   API_KEY
-#   HTTPS_REDIRECT=false
 
 services:
-  # ── Redis ──────────────────────────────────────────────────────────
-  redis:
-    image: redis:7-alpine
-    container_name: inference-redis
-    volumes:
-      - redis-data:/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+  service-inference:
+    environment:
+      - HTTPS_REDIRECT=false          # Traefik terminates TLS / handles redirect
     networks:
       - inference-network
-
-  # ── FastAPI service ────────────────────────────────────────────────
-  trocr-inference:
-    image: service-trocr-inference:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: runtime-cpu
-      args:
-        TORCH_VERSION: ${TORCH_VERSION:-2.7.1}
-        TORCHVISION_VERSION: ${TORCHVISION_VERSION:-0.22.1}
-        TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
-        CUDA_RUNTIME_IMAGE: ${CUDA_RUNTIME_IMAGE:-nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04}
-        CUDA_CUPTI_PKG_VERSION: ${CUDA_CUPTI_PKG_VERSION:-12-4}
-    pull_policy: missing
-    container_name: service-trocr-inference
-
-    # No direct port exposure. Traefik handles HTTPS ingress.
-    env_file:
-      - .env
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - ENVIRONMENT=production
-      - HTTPS_REDIRECT=false
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
-    deploy:
-      resources:
-        limits:
-          cpus: "2.0"
-          memory: 4G
-        reservations:
-          cpus: "1.0"
-          memory: 1G
-
+      - traefik-public
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-public"
-
-      - "traefik.http.routers.trocr-inference.rule=Host(`${APP_DOMAIN}`)"
-      - "traefik.http.routers.trocr-inference.entrypoints=websecure"
-      - "traefik.http.routers.trocr-inference.tls=true"
-      - "traefik.http.routers.trocr-inference.tls.certresolver=letsencrypt"
-
-      - "traefik.http.services.trocr-inference.loadbalancer.server.port=8000"
-
-    networks:
-      - inference-network
-      - traefik_net
-
-  # ── Celery worker ──────────────────────────────────────────────────
-  celery-worker:
-    image: service-trocr-inference:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
-    pull_policy: missing
-    container_name: inference-celery-worker
-    command: celery -A app.celery_app.celery_app worker --loglevel=${LOG_LEVEL:-INFO} --concurrency=${CELERY_CONCURRENCY:-1}
-    env_file:
-      - .env
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - ENVIRONMENT=production
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
-    # Worker has no HTTP server, so override Dockerfile's /health check.
-    healthcheck:
-      test: ["CMD-SHELL", "test -d /proc/1 || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-
-    deploy:
-      resources:
-        limits:
-          cpus: "2.0"
-          memory: 4G
-        reservations:
-          cpus: "1.0"
-          memory: 1G
-
-    networks:
-      - inference-network
-
-volumes:
-  redis-data:
-    driver: local
+      - "traefik.http.routers.trocr.rule=Host(`${APP_DOMAIN}`)"
+      - "traefik.http.routers.trocr.entrypoints=websecure"
+      - "traefik.http.routers.trocr.tls=true"
+      - "traefik.http.routers.trocr.tls.certresolver=letsencrypt"
+      - "traefik.http.services.trocr.loadbalancer.server.port=8000"
 
 networks:
-  inference-network:
-    name: inference-network
-
-  traefik_net:
+  traefik-public:
     external: true
-    name: traefik-public
