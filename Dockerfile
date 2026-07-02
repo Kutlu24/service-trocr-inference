@@ -32,9 +32,9 @@ ARG TORCH_VARIANT=cpu
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ "${TORCH_VARIANT}" != "cpu" ]; then \
          uv pip install \
-             "torch==${TORCH_VERSION}+${TORCH_VARIANT}" \
-             "torchvision==${TORCHVISION_VERSION}+${TORCH_VARIANT}" \
-             --index-url "https://download.pytorch.org/whl/${TORCH_VARIANT}"; \
+             torch==${TORCH_VERSION} \
+             torchvision==${TORCHVISION_VERSION} \
+             --index-url https://download.pytorch.org/whl/${TORCH_VARIANT}; \
      fi
 
 # ================================
@@ -66,7 +66,7 @@ RUN useradd --create-home --uid 10001 appuser
 WORKDIR /app
 COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
 COPY --chown=appuser:appuser ./src /app/src
-
+RUN chown appuser:appuser /app/
 USER appuser
 
 EXPOSE 8000
