@@ -12,7 +12,7 @@
 services:
   # --concurrency 1 serializes work so two GPU training jobs can't OOM the card;
   # raise it only if you accept that risk for more parallel light tasks.
-  inference-celery-worker:
+  celery-worker:
     runtime: nvidia
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
