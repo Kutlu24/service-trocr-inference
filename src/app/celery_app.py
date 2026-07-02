@@ -92,19 +92,19 @@ def task_postrun_handler(task_id=None, state=None, retval=None, **kwargs):
     """Fire when task finishes successfully."""
     logger.info(f"Task {task_id} postrun | celery_state={state}")
 
-    if state != "SUCCESS":
-        return
-
     task = redis_repository.get_by_id(task_id)
     if task is None:
         logger.warning(f"Task {task_id} not found in repository during postrun")
         return
 
-    task.state = StateEnum.COMPLETED
     task.ended_at = datetime.now(UTC)
-
     if task.started_at:
         task.runtime_seconds = (task.ended_at - task.started_at).total_seconds()
+
+    if state == "SUCCESS":
+        task.state = StateEnum.COMPLETED
+    else:
+        task.state = StateEnum.FAILED
 
     if isinstance(retval, dict):
         for key, value in retval.items():
