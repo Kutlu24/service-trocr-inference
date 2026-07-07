@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     )]
 
     REDIS_URL: Annotated[str, Field(
-        default="redis://localhost:6379/0",
+        default="redis://redis:6379/0",
         alias="redis_url",
     )]
 
@@ -64,6 +64,19 @@ class Settings(BaseSettings):
         default={"GET", "POST", "OPTIONS"},
         alias="cors_allowed_methods",
     )]
+    CELERY_TASK_TIME_LIMIT: Annotated[int, Field(
+        default=3600,
+        alias="celery_task_time_limit",
+    )]
+    CELERY_TASK_SOFT_TIME_LIMIT: Annotated[int, Field(
+        default=3300,
+        alias="celery_task_soft_time_limit",
+    )]
+
+    TORCH_VARIANT: Annotated[str, Field(
+        default="cpu",
+        alias="torch_variant",
+    )]
 
     @property
     def is_production(self) -> bool:
@@ -72,4 +85,5 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
+        extra="ignore",
     )

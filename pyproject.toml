@@ -37,6 +37,9 @@ dependencies = [
     "redis>=5.0.0",
     "slowapi>=0.1.9",
     "uvicorn[standard]>=0.37,<0.39",
+    "torch>=2.6",
+    "torchvision>=0.19",
+    "celery-types>=0.26.0",
 ]
 
 keywords = [
