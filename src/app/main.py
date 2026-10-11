@@ -77,6 +77,11 @@ limiter = Limiter(
     default_limits=["100 per day", "4/minute"],
 )
 
+# Status endpoints are polled by the n8n workflows (every 30 s per running job),
+# always from the same client address, so they get their own, higher limit
+# instead of the strict defaults meant for job-starting requests.
+STATUS_RATE_LIMIT = "60/minute"
+
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 app.add_middleware(SlowAPIMiddleware)
@@ -140,7 +145,9 @@ async def start_inference(
     response_model=list[InferenceResponseModel],
     dependencies=[Depends(check_api_key)],
 )
+@limiter.limit(STATUS_RATE_LIMIT)
 async def get_inference_status(
+    request: Request,
     repository: RedisStatusRepository = Depends(get_repository),
 ) -> list[InferenceResponseModel]:
     data = repository.get_all("inference")
@@ -154,7 +161,9 @@ async def get_inference_status(
     response_model=InferenceResponseModel,
     dependencies=[Depends(check_api_key)],
 )
+@limiter.limit(STATUS_RATE_LIMIT)
 async def get_inference_status_by_id(
+    request: Request,
     uuid: str,
     repository: RedisStatusRepository = Depends(get_repository),
 ) -> InferenceResponseModel:
@@ -209,7 +218,9 @@ async def start_hf_evaluation(
     response_model=list[EvaluationResponseModel],
     dependencies=[Depends(check_api_key)],
 )
+@limiter.limit(STATUS_RATE_LIMIT)
 async def get_all_evaluation_statuses(
+    request: Request,
     repository: RedisStatusRepository = Depends(get_repository),
 ) -> list[EvaluationResponseModel]:
     data = repository.get_all("evaluation")
@@ -223,7 +234,9 @@ async def get_all_evaluation_statuses(
     response_model=EvaluationResponseModel,
     dependencies=[Depends(check_api_key)],
 )
+@limiter.limit(STATUS_RATE_LIMIT)
 async def get_evaluation_status(
+    request: Request,
     uuid: str,
     repository: RedisStatusRepository = Depends(get_repository),
 ) -> EvaluationResponseModel:
@@ -285,7 +298,9 @@ async def start_xml_merge(
     response_model=list[RawXMLMergeResponseModel],
     dependencies=[Depends(check_api_key)],
 )
+@limiter.limit(STATUS_RATE_LIMIT)
 async def get_all_xml_merge_statuses(
+    request: Request,
     repository: RedisStatusRepository = Depends(get_repository),
 ) -> list[RawXMLMergeResponseModel]:
     data = repository.get_all("xml_merge")
@@ -299,7 +314,9 @@ async def get_all_xml_merge_statuses(
     response_model=RawXMLMergeResponseModel,
     dependencies=[Depends(check_api_key)],
 )
+@limiter.limit(STATUS_RATE_LIMIT)
 async def get_xml_merge_status(
+    request: Request,
     uuid: str,
     repository: RedisStatusRepository = Depends(get_repository),
 ) -> RawXMLMergeResponseModel:
