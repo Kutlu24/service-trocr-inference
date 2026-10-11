@@ -325,5 +325,4 @@ def health_check(request: Request):
         "status": "healthy" if repository_status == "initialized" else "degraded",
         "service": "service-trocr-inference",
         "repository": repository_status,
-        "redis_url": settings.REDIS_URL,
     }
